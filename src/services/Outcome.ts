@@ -1,5 +1,5 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocument, GetCommandOutput, PutCommandOutput } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocument, GetCommandOutput, PutCommandOutput, UpdateCommandOutput } from '@aws-sdk/lib-dynamodb';
 import { v4 as uuidv4 } from 'uuid'
 
 interface OutComeAttributes {
@@ -19,15 +19,37 @@ export default class Outcome {
     this.db = DynamoDBDocument.from(client);
   }
 
-  async createAndFetch(options: Record<string, any>) {
+  async createAndFetchItem(options: Record<string, any>) {
     const attributes = this.mappingAttributes(options);
     const response = await this.addRecord(attributes);
 
-    if (response.$metadata.httpStatusCode === 200) {
-      return (await this.getRecord()).Item;
+    return response?.$metadata?.httpStatusCode === 200
+      ? (await this.getRecord()).Item
+      : undefined
+  }
+
+  async updateItem(options: Record<string, any>) {
+    const callbackQueryData = options?.callback_query?.data;
+    const callbackqueryId = options?.callback_query?.id;
+
+    if (!callbackQueryData && !callbackqueryId) {
+      return undefined
     }
 
-    return undefined;
+    const data = JSON.parse(callbackQueryData);
+    this.uid = data.id;
+
+    const attributes =  {
+      id: data.id,
+      category: data.category,
+      callbackqueryId
+    }
+
+    const response = await this.updateRecord(attributes);
+
+    return response?.$metadata?.httpStatusCode === 200
+      ? (await this.getRecord())?.Item
+      : undefined;
   }
 
   private async addRecord(attributes: OutComeAttributes): Promise<PutCommandOutput> {
@@ -37,6 +59,20 @@ export default class Outcome {
     }
 
     return this.db.put(params)
+  }
+
+  private async updateRecord(attributes: Record<string, any>): Promise<UpdateCommandOutput> {
+    const params = {
+      TableName: 'Outcome',
+      UpdateExpression: "set category = :category, callbackqueryId = :callbackqueryId",
+      ExpressionAttributeValues: {
+        ":category": attributes.category,
+        ":callbackqueryId": attributes.callbackqueryId,
+      },
+      Key: { id: attributes.id },
+    }
+
+    return this.db.update(params);
   }
 
   private getRecord(): Promise<GetCommandOutput> {
